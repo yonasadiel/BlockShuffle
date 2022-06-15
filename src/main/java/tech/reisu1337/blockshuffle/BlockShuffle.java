@@ -12,7 +12,6 @@ import java.util.logging.Logger;
 public final class BlockShuffle extends JavaPlugin {
     private File settingsFile;
     private boolean inProgress;
-    private boolean roundWon = false;
 
     public static Logger LOGGER;
 
@@ -49,14 +48,6 @@ public final class BlockShuffle extends JavaPlugin {
 
     public void setInProgress(boolean inProgress) {
         this.inProgress = inProgress;
-    }
-
-    public boolean isRoundWon() {
-        return this.roundWon;
-    }
-
-    public void setRoundWon(boolean roundWon) {
-        this.roundWon = roundWon;
     }
 }
 

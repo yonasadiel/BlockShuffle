@@ -15,34 +15,32 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.scoreboard.*;
 import tech.reisu1337.blockshuffle.BlockShuffle;
 
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.StringJoiner;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class PlayerListener implements Listener {
-    private final Map<UUID, Material> userMaterialMap = new ConcurrentHashMap<>();
-    private final Set<UUID> completedUsers = Sets.newConcurrentHashSet();
-    private final Set<UUID> usersInGame = Sets.newConcurrentHashSet();
-    private final Random random = new Random();
+    private static final long ROUND_DURATION_SECONDS = 60;
+
     private final BlockShuffle plugin;
     private final YamlConfiguration settings;
-
-    private List<Material> materials;
-    private int ticksInRound = 6000;
-    private int bossBarTask;
-    private int roundEndTask;
-    private BossBar bossBar;
-    private long roundStartTime;
     private String materialPath;
+    private final Random random = new Random();
+    private List<Material> materials;
+
+    private final Set<UUID> usersInGame = Sets.newConcurrentHashSet();
+    private final Map<UUID, Date> userStartTime = new ConcurrentHashMap<>();
+    private final Map<UUID, Material> userMaterialMap = new ConcurrentHashMap<>();
+    private Objective objective;
+    private int updateTask;
+
+    // FOR DEBUG
+//    private int inc;
 
     public PlayerListener(YamlConfiguration settings, BlockShuffle plugin) {
         this.settings = settings;
@@ -50,97 +48,90 @@ public class PlayerListener implements Listener {
     }
 
     public void startGame() {
+        Date startTime = new Date();
         this.materials = this.settings.getStringList(this.materialPath).stream().map(Material::getMaterial).collect(Collectors.toList());
-        plugin.setRoundWon(false);
+        this.objective = Bukkit.getScoreboardManager().getMainScoreboard().registerNewObjective("blockshuffle", "dummy","Block Shuffle");
+        this.objective.setDisplaySlot(DisplaySlot.SIDEBAR);
         for (Player player : Bukkit.getOnlinePlayers()) {
             this.usersInGame.add(player.getUniqueId());
+            this.userStartTime.put(player.getUniqueId(), startTime);
+            this.nextRound(player, true, false);
+            this.objective.getScore(player.getName()).setScore(0);
         }
-        this.bossBar = this.createBossBar();
-        this.nextRound();
-        this.bossBarTask = Bukkit.getScheduler().scheduleSyncRepeatingTask(this.plugin, this::updateBossBar, 0, 20);
+        this.updateTask = Bukkit.getScheduler().scheduleSyncRepeatingTask(this.plugin, this::update, 0, 10);
+//        this.inc = 0;
     }
 
-    public void resetGame() {
-        this.ticksInRound = 6000;
-        this.userMaterialMap.clear();
-        this.usersInGame.clear();
-        this.completedUsers.clear();
-        this.plugin.setInProgress(false);
-        this.bossBar.removeAll();
-        Bukkit.getScheduler().cancelTask(this.roundEndTask);
-        Bukkit.getScheduler().cancelTask(this.bossBarTask);
-    }
-
-    private void nextRound() {
-        if (this.ticksInRound != 6000) {
-            if (this.completedUsers.size() <= 1) {
-                Bukkit.broadcastMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> &f" + this.createWinnerMessage()));
-                this.resetGame();
-                return;
-            } else {
-                for (UUID uuid : this.usersInGame) {
-                    if (!this.completedUsers.contains(uuid)) {
-                        usersInGame.remove(uuid);
-                        userMaterialMap.remove(uuid);
-                        Bukkit.getPlayer(uuid).sendMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> " + "&4" + Bukkit.getPlayer(uuid).getName() + ",&f you have been knocked out!"));
-                    }
-                }
+    public void finishGame() {
+        Player winner = null;
+        int winnerScore = 0;
+        // TODO: store player's current level and exp?
+        for (UUID playerUUID : this.usersInGame) {
+            Player player = Bukkit.getPlayer(playerUUID);
+            player.setLevel(0);
+            player.setExp(0);
+            int score = this.objective.getScore(player.getName()).getScore();
+            if (winner == null || score > winnerScore) {
+                winnerScore = score;
+                winner = player;
             }
-            this.completedUsers.clear();
         }
-        this.bossBar.setVisible(true);
-        this.roundStartTime = System.currentTimeMillis();
-        for (UUID uuid : this.usersInGame) {
-            Player player = Bukkit.getPlayer(uuid);
-            Material randomBlock = this.getRandomMaterial();
-            String playerOnBlock2 = randomBlock.toString().replaceAll("_", " ");
-            playerOnBlock2 = WordUtils.swapCase(playerOnBlock2).toLowerCase(Locale.ROOT);
-            playerOnBlock2 = WordUtils.capitalize(playerOnBlock2);
-            this.userMaterialMap.put(uuid, randomBlock);
-            BlockShuffle.LOGGER.log(Level.INFO, player.getName() + " got " + playerOnBlock2);
-            player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> " + "&4" + player.getName() + ",&f you have " + this.ticksInRound / 1200 + " mins to stand on &d" + playerOnBlock2));
-        }
-        this.roundEndTask = Bukkit.getScheduler().scheduleSyncDelayedTask(this.plugin, this::nextRound, this.ticksInRound);
-        this.ticksInRound -= 600;
+        this.plugin.getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> &2" + winner.getName() + " &f is the winner!"));
+
+        this.usersInGame.clear();
+        this.userStartTime.clear();
+        this.userMaterialMap.clear();
+        Bukkit.getScheduler().cancelTask(this.updateTask);
+        this.objective.unregister();
     }
 
-    private String createWinnerMessage() {
-        //The game is over! The winner(s) are A, B, C etc
-        StringJoiner stringJoiner = new StringJoiner(", ", "The game is over, the winners are: ", "!");
-        if (this.completedUsers.size() > 0) {
-            for (UUID uuid : this.completedUsers) {
-                stringJoiner.add(Bukkit.getPlayer(uuid).getName());
+    public void update() {
+        for (UUID playerUUID : this.usersInGame) {
+            Player player = Bukkit.getPlayer(playerUUID);
+            Date startTime = this.userStartTime.get(playerUUID);
+            long remainngSeconds = ROUND_DURATION_SECONDS - (new Date().getTime() - startTime.getTime()) / 1000;
+
+            if (remainngSeconds <= 0) {
+                this.nextRound(player, false, false);
+                remainngSeconds = ROUND_DURATION_SECONDS;
+            }
+            player.setLevel((int) remainngSeconds);
+            player.setExp((float) remainngSeconds / ROUND_DURATION_SECONDS);
+        }
+    }
+
+    private void nextRound(Player player, boolean firstRound, boolean success) {
+        this.userStartTime.put(player.getUniqueId(), new Date());
+        String broadcastMessage = "&6<BlockShuffle> &2" + player.getName() + " &f";
+        if (!firstRound) {
+            if (success) {
+                broadcastMessage += "success! Next block: ";
+                Score score = this.objective.getScore(player.getName());
+                score.setScore(score.getScore() + 1);
+            } else {
+                broadcastMessage += "failed! Next block: ";
             }
         } else {
-            for (UUID uuid : this.usersInGame) {
-                stringJoiner.add(Bukkit.getPlayer(uuid).getName());
-            }
+            broadcastMessage += "get block: ";
         }
-        return stringJoiner.toString();
-    }
+        Material randomBlock = this.getRandomMaterial();
+        this.userMaterialMap.put(player.getUniqueId(), randomBlock);
+        // FOR DEBUG
+        player.getInventory().addItem(new ItemStack(randomBlock));
 
-    private BossBar createBossBar() {
-        BossBar bossBar = Bukkit.createBossBar("Time left: ", BarColor.PINK, BarStyle.SOLID);
-        for (UUID uuid : this.usersInGame) {
-            Player player = Bukkit.getPlayer(uuid);
-            bossBar.addPlayer(player);
-        }
-        return bossBar;
-    }
+        String randomBlockName = randomBlock.toString().replaceAll("_", " ");
+        randomBlockName = WordUtils.swapCase(randomBlockName).toLowerCase(Locale.ROOT);
+        randomBlockName = WordUtils.capitalize(randomBlockName);
+        broadcastMessage += "&3" + randomBlockName + "&f!";
 
-    private void updateBossBar() {
-        long timeSinceRoundStart = System.currentTimeMillis() - this.roundStartTime;
-        long millisInRound = ((this.ticksInRound + 600) / 20) * 1000L;
-        long millisRemaining = millisInRound - timeSinceRoundStart;
-
-        double progress = millisRemaining / (double) millisInRound;
-
-        this.bossBar.setProgress(progress);
-        this.bossBar.setTitle("Time Remaining in BlockShuffle Round: " + millisRemaining / 1000 + "secs");
+        this.plugin.getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', broadcastMessage));
     }
 
     private Material getRandomMaterial() {
-        int randomIndex = this.random.nextInt(this.materials.size() - 1);
+        int randomIndex = this.random.nextInt(this.materials.size());
+//        Material material = this.materials.get(this.inc);
+//        this.inc += 1;
+//        return material;
         return this.materials.get(randomIndex);
     }
 
@@ -149,29 +140,7 @@ public class PlayerListener implements Listener {
         Player player = event.getPlayer();
         Material materialBelow = player.getLocation().getBlock().getRelative(BlockFace.DOWN).getBlockData().getMaterial();
         if (this.userMaterialMap.get(player.getUniqueId()) == materialBelow) {
-            if (!this.plugin.isRoundWon()) {
-                this.plugin.getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> " + "&2" + player.getName() + "&f has found their block!"));
-                this.completedUsers.add(player.getUniqueId());
-            }
-            this.userMaterialMap.remove(event.getPlayer().getUniqueId());
-            if (this.userMaterialMap.size() == 0) {
-                this.plugin.setInProgress(false);
-            }
-            if (this.completedUsers.size() == this.usersInGame.size()) {
-                Bukkit.getScheduler().cancelTask(this.roundEndTask);
-                this.nextRound();
-            }
-        }
-    }
-
-    @EventHandler
-    public void onPlayerQuitEvent(PlayerQuitEvent event) {
-        UUID playerUUID = event.getPlayer().getUniqueId();
-        if (this.usersInGame.remove(playerUUID)) {
-            this.completedUsers.remove(playerUUID);
-            if (this.usersInGame.size() == 0) {
-                this.resetGame();
-            }
+            this.nextRound(player, false, true);
         }
     }
 

@@ -31,17 +31,18 @@ public class BlockShuffleCommand implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equals("blockshuffle")) {
-            if (!(sender instanceof Player player)) {
+            if (!(sender instanceof Player)) {
                 sender.sendMessage("you cannot execute this command from console.");
                 return true;
             }
+            Player player = (Player) sender;
             if (args.length == 0) {
                 this.blockShuffleMenu.show(player);
             } else if (args[0].equalsIgnoreCase("stop")) {
                 if (!this.plugin.isInProgress()) {
                     sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> " + "&4" + this.stopError));
                 } else {
-                    this.playerListener.resetGame();
+                    this.playerListener.finishGame();
                     Bukkit.broadcastMessage(ChatColor.translateAlternateColorCodes('&', "&6<BlockShuffle> " + "&2" + this.stopGame));
                 }
             } else {
