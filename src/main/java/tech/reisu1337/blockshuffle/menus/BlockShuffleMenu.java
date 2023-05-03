@@ -72,14 +72,14 @@ public class BlockShuffleMenu implements InventoryHolder, Listener {
 
         event.setCancelled(true);
         int slot = event.getRawSlot();
-
-        switch (slot) {
-            case 2 -> this.playerListener.setMaterialPath("materials");
-            case 3 -> this.playerListener.setMaterialPath("easy_materials");
-            case 4 -> this.playerListener.setMaterialPath("nether_materials");
-            case 5 -> this.playerListener.setMaterialPath("colour_materials");
-            case 6 -> this.playerListener.setMaterialPath("user_materials");
-        }
+//
+//        switch (slot) {
+//            case 2 -> this.playerListener.setMaterialPath("materials");
+//            case 3 -> this.playerListener.setMaterialPath("easy_materials");
+//            case 4 -> this.playerListener.setMaterialPath("nether_materials");
+//            case 5 -> this.playerListener.setMaterialPath("colour_materials");
+//            case 6 -> this.playerListener.setMaterialPath("user_materials");
+//        }
         Player player = (Player) event.getWhoClicked();
 
         if (this.plugin.isInProgress()) {
